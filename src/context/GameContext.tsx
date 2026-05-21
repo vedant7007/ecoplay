@@ -18,6 +18,8 @@ export interface GameState {
     waterStorage: number;
     filterHealth: number;
     lastUpdated: number;
+    inventory: string[];
+    landscape: { emoji: string; x: number; y: number }[];
   };
   dailyChallenges: {
     id: string;
@@ -47,7 +49,9 @@ const initialState: GameState = {
     wildlife: [],
     waterStorage: 100,
     filterHealth: 100,
-    lastUpdated: Date.now()
+    lastUpdated: Date.now(),
+    inventory: [],
+    landscape: []
   },
   dailyChallenges: [
     {
