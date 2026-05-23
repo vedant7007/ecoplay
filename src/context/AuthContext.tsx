@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import type { AuthContextType, AuthResponse, User } from "../types/auth";
+import { clearState } from "../services/persistence";
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -145,6 +146,9 @@ export const AuthProvider: React.FC<{
   };
 
   const logout = async (): Promise<void> => {
+    if (user) {
+      clearState(user.id);
+    }
     await supabase.auth.signOut();
     setUser(null);
     // onAuthStateChange also fires and sets user → null for safety

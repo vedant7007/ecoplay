@@ -3,7 +3,15 @@ export interface PersistPayload {
   state: any;
 }
 
-const keyFor = (userId: string) => `ecoplay.state.${userId}`;
+export const keyFor = (userId: string) => `ecoplay.state.${userId}`;
+
+export function clearState(userId: string) {
+  try {
+    localStorage.removeItem(keyFor(userId));
+  } catch {
+    // ignore
+  }
+}
 
 export function loadState(userId: string) {
   try {
