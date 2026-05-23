@@ -1,9 +1,16 @@
 import React from 'react';
 import { useAuth } from './AuthContext';
-import { loadState, saveState } from '../services/persistence';
+import { loadStateWithDefaults, saveState } from '../services/persistence';
 import { awardXP } from '../lib/gamification';
+import {
+  applyChallengeCompletion,
+  applyMissedDayProtection,
+  createStreakState,
+  getStreakNotification,
+  normalizeStreakState,
+  type StreakState,
+} from '../lib/streakFreeze';
 
-// Define your GameState shape (example – adapt to your existing state)
 export interface GameState {
   user: { points: number; name: string };
   ecoVillage: {
@@ -33,8 +40,81 @@ export interface GameState {
     totalTrashCollected: number;
     perfectCleanups: number;
   };
+  streakState: StreakState;
   notifications: string[];
 }
+
+interface GameActionBase {
+  payload?: unknown;
+  activityType?: string;
+  metadata?: Record<string, unknown>;
+}
+
+interface AddPointsAction extends GameActionBase {
+  type: 'ADD_POINTS';
+  payload: number;
+}
+
+interface CompleteDailyChallengeAction extends GameActionBase {
+  type: 'COMPLETE_DAILY_CHALLENGE';
+  payload: { points: number; challengeId: string };
+}
+
+interface SetStreakStateAction extends GameActionBase {
+  type: 'SET_STREAK_STATE';
+  payload: StreakState;
+}
+
+interface UpdateChallengeAction extends GameActionBase {
+  type: 'UPDATE_CHALLENGE';
+  payload: { id: string; data: Partial<GameState['dailyChallenges'][number]> };
+}
+
+interface UpdateEcoVillageAction extends GameActionBase {
+  type: 'UPDATE_ECO_VILLAGE';
+  payload: Partial<GameState['ecoVillage']>;
+}
+
+interface UpdateOceanStatsAction extends GameActionBase {
+  type: 'UPDATE_OCEAN_STATS';
+  payload: Partial<GameState['gameStats']>;
+}
+
+interface HydrateAction extends GameActionBase {
+  type: 'HYDRATE';
+  payload: Partial<GameState>;
+}
+
+interface AddNotificationAction extends GameActionBase {
+  type: 'ADD_NOTIFICATION';
+  payload: string;
+}
+
+interface ClearNotificationsAction {
+  type: 'CLEAR_NOTIFICATIONS';
+}
+
+interface SimulateTimeAction {
+  type: 'SIMULATE_TIME';
+}
+
+interface DefaultAction {
+  type: string;
+  payload?: unknown;
+}
+
+type GameAction =
+  | AddPointsAction
+  | CompleteDailyChallengeAction
+  | SetStreakStateAction
+  | UpdateChallengeAction
+  | UpdateEcoVillageAction
+  | UpdateOceanStatsAction
+  | HydrateAction
+  | AddNotificationAction
+  | ClearNotificationsAction
+  | SimulateTimeAction
+  | DefaultAction;
 
 const initialState: GameState = {
   user: { points: 0, name: 'Player' },
@@ -51,7 +131,7 @@ const initialState: GameState = {
     filterHealth: 100,
     lastUpdated: Date.now(),
     inventory: [],
-    landscape: []
+    landscape: [],
   },
   dailyChallenges: [
     {
@@ -60,7 +140,7 @@ const initialState: GameState = {
       description: 'Add a tree to your eco village.',
       points: 50,
       progress: 0,
-      completed: false
+      completed: false,
     },
     {
       id: 'c2',
@@ -68,24 +148,46 @@ const initialState: GameState = {
       description: 'Play a cleanup round.',
       points: 40,
       progress: 0,
-      completed: false
-    }
+      completed: false,
+    },
   ],
   gameStats: {
     totalTrashCollected: 0,
-    perfectCleanups: 0
+    perfectCleanups: 0,
   },
-  notifications: []
+  streakState: createStreakState(),
+  notifications: [],
 };
+
+function buildHydratedState(userName: string, loaded?: Partial<GameState> | null): GameState {
+  const base = {
+    ...initialState,
+    user: { ...initialState.user, name: userName },
+  };
+
+  if (!loaded) {
+    return base;
+  }
+
+  return {
+    ...base,
+    ...loaded,
+    user: { ...base.user, ...loaded.user },
+    ecoVillage: { ...base.ecoVillage, ...loaded.ecoVillage },
+    gameStats: { ...base.gameStats, ...loaded.gameStats },
+    dailyChallenges: loaded.dailyChallenges ?? base.dailyChallenges,
+    streakState: normalizeStreakState(loaded.streakState ?? base.streakState),
+    notifications: loaded.notifications ?? [],
+  };
+}
 
 type GameContextValue = {
   state: GameState;
-  dispatch: React.Dispatch<any>;
+  dispatch: React.Dispatch<GameAction>;
 };
 
 export const GameContext = React.createContext<GameContextValue | undefined>(undefined);
 
-// Simulation constants
 const RAIN_INTERVAL_MS = 15 * 60 * 1000;
 const WATER_PER_RAIN = 20;
 const WATER_CONSUMED_PER_TREE_PER_HOUR = 2;
@@ -141,28 +243,44 @@ function simulateTimePassed(state: GameState): { updates: Partial<GameState['eco
   return { updates, events };
 }
 
-function reducer(state: GameState, action: any): GameState {
+function reducer(state: GameState, action: GameAction): GameState {
   switch (action.type) {
     case 'ADD_POINTS':
-      return { ...state, user: { ...state.user, points: state.user.points + action.payload } };
+      return {
+        ...state,
+        user: { ...state.user, points: state.user.points + Number(action.payload ?? 0) },
+      };
+    case 'COMPLETE_DAILY_CHALLENGE':
+      return {
+        ...state,
+        user: { ...state.user, points: state.user.points + Number(action.payload?.points ?? 0) },
+      };
+    case 'SET_STREAK_STATE':
+      return { ...state, streakState: action.payload };
     case 'UPDATE_CHALLENGE':
       return {
         ...state,
         dailyChallenges: state.dailyChallenges.map(c =>
           c.id === action.payload.id ? { ...c, ...action.payload.data } : c
-        )
+        ),
       };
     case 'UPDATE_ECO_VILLAGE':
       return {
         ...state,
-        ecoVillage: { ...state.ecoVillage, ...action.payload, lastUpdated: Date.now() }
+        ecoVillage: { ...state.ecoVillage, ...action.payload, lastUpdated: Date.now() },
       };
-    case 'SIMULATE_TIME':
+    case 'SIMULATE_TIME': {
       const { updates, events } = simulateTimePassed(state);
       return {
         ...state,
         ecoVillage: { ...state.ecoVillage, ...updates },
-        notifications: events
+        notifications: events,
+      };
+    }
+    case 'ADD_NOTIFICATION':
+      return {
+        ...state,
+        notifications: [action.payload, ...state.notifications].slice(0, 5),
       };
     case 'CLEAR_NOTIFICATIONS':
       return { ...state, notifications: [] };
@@ -173,10 +291,10 @@ function reducer(state: GameState, action: any): GameState {
           ...state.gameStats,
           totalTrashCollected: action.payload.totalTrashCollected ?? state.gameStats.totalTrashCollected,
           perfectCleanups: action.payload.perfectCleanups ?? state.gameStats.perfectCleanups,
-        }
+        },
       };
     case 'HYDRATE':
-      return { ...state, ...action.payload };
+      return buildHydratedState(state.user.name, action.payload);
     default:
       return state;
   }
@@ -188,13 +306,22 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   React.useEffect(() => {
     if (!user) return;
-    const loaded = loadState(user.id);
-    if (loaded) {
-      dispatchBase({ type: 'HYDRATE', payload: loaded });
-      setTimeout(() => dispatchBase({ type: 'SIMULATE_TIME' }), 100);
-    } else {
-      dispatchBase({ type: 'HYDRATE', payload: { ...initialState, user: { ...initialState.user, name: user.name } } });
+
+    const hydrated = loadStateWithDefaults(user.id, buildHydratedState(user.name, null));
+    const protection = applyMissedDayProtection(normalizeStreakState(hydrated.streakState));
+    const nextState = buildHydratedState(user.name, {
+      ...hydrated,
+      streakState: protection.nextState,
+    });
+
+    dispatchBase({ type: 'HYDRATE', payload: nextState });
+
+    const notification = getStreakNotification(protection.event);
+    if (notification) {
+      dispatchBase({ type: 'ADD_NOTIFICATION', payload: notification });
     }
+
+    setTimeout(() => dispatchBase({ type: 'SIMULATE_TIME' }), 100);
   }, [user]);
 
   React.useEffect(() => {
@@ -203,28 +330,46 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => clearTimeout(t);
   }, [state, user]);
 
-  // Award login bonus XP once per session
   React.useEffect(() => {
     if (!user?.id) return;
     awardXP(user.id, 'login_bonus').catch((e) => console.error('[XP] login bonus failed:', e));
   }, [user?.id]);
 
-  const dispatch = React.useCallback((action: any) => {
+  const dispatch = React.useCallback((action: GameAction) => {
+    if (action.type === 'COMPLETE_DAILY_CHALLENGE') {
+      const transition = applyChallengeCompletion(state.streakState);
+      dispatchBase({ type: 'COMPLETE_DAILY_CHALLENGE', payload: action.payload });
+      dispatchBase({ type: 'SET_STREAK_STATE', payload: transition.nextState });
+
+      const message = getStreakNotification(transition.event);
+      if (message) {
+        dispatchBase({ type: 'ADD_NOTIFICATION', payload: message });
+      }
+
+      if (transition.event !== 'duplicate' && user?.id) {
+        awardXP(user.id, 'daily_challenge', { challengeId: action.payload?.challengeId ?? null })
+          .then(() => console.log('[XP] Daily challenge processed'))
+          .catch((e) => console.error('[XP] Daily challenge failed:', e));
+      }
+      return;
+    }
+
     dispatchBase(action);
 
     if (action.type === 'ADD_POINTS') {
-      if (!user?.id) {
-        console.warn('[XP] No user ID — skipping XP award');
+      const value = Number(action.payload ?? 0);
+      if (!user?.id || value <= 0) {
         return;
       }
+
       const activity = action.activityType ?? 'daily_challenge';
       console.log('[XP] Awarding XP for', activity, 'user:', user.id);
-      awardXP(user.id, activity, action.metadata)
+      awardXP(user.id, activity as never, action.metadata)
         .then((result) => console.log('[XP] Award result:', result))
         .catch((e) => console.error('[XP] Award failed:', e));
     }
-  }, [user?.id]);
-  
+  }, [state.streakState, user?.id]);
+
   return (
     <GameContext.Provider value={{ state, dispatch }}>
       {children}
@@ -232,6 +377,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 };
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useGame = () => {
   const ctx = React.useContext(GameContext);
   if (!ctx) throw new Error('useGame must be used within GameProvider');

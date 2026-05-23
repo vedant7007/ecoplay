@@ -1,6 +1,6 @@
-export interface PersistPayload {
+export interface PersistPayload<T> {
   userId: string;
-  state: any;
+  state: T;
 }
 
 export const keyFor = (userId: string) => `ecoplay.state.${userId}`;
@@ -13,17 +13,23 @@ export function clearState(userId: string) {
   }
 }
 
-export function loadState(userId: string) {
+export function loadState<T>(userId: string): T | null {
   try {
     const raw = localStorage.getItem(keyFor(userId));
     if (!raw) return null;
-    return JSON.parse(raw);
+    return JSON.parse(raw) as T;
   } catch {
     return null;
   }
 }
 
-export function saveState({ userId, state }: PersistPayload) {
+export function loadStateWithDefaults<T>(userId: string, defaults: T): T {
+  const raw = loadState<T>(userId);
+  if (!raw) return defaults;
+  return { ...defaults, ...raw };
+}
+
+export function saveState<T>({ userId, state }: PersistPayload<T>) {
   try {
     localStorage.setItem(keyFor(userId), JSON.stringify(state));
   } catch {

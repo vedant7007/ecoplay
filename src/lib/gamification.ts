@@ -44,6 +44,8 @@ export interface UserStreak {
   currentStreak: number;
   longestStreak: number;
   lastActivityDate: string | null;
+  streakFreezes: number;
+  lastFreezeResetDate: string | null;
   streakMultiplier: number;
 }
 
@@ -248,15 +250,17 @@ export async function getUserStats(userId: string): Promise<UserStats | null> {
 export async function getUserStreak(userId: string): Promise<UserStreak> {
   const { data } = await supabase
     .from('user_streaks')
-    .select('current_streak, longest_streak, last_activity_date, streak_multiplier')
+    .select('current_streak, longest_streak, last_activity_date, streak_freeze_count, last_freeze_reset_at, streak_multiplier')
     .eq('user_id', userId)
     .single();
 
   return {
-    currentStreak:    data?.current_streak    ?? 0,
-    longestStreak:    data?.longest_streak    ?? 0,
-    lastActivityDate: data?.last_activity_date ?? null,
-    streakMultiplier: data?.streak_multiplier  ?? 1.0,
+    currentStreak:      data?.current_streak        ?? 0,
+    longestStreak:      data?.longest_streak        ?? 0,
+    lastActivityDate:   data?.last_activity_date    ?? null,
+    streakFreezes:      data?.streak_freeze_count   ?? 0,
+    lastFreezeResetDate: data?.last_freeze_reset_at ?? null,
+    streakMultiplier:   data?.streak_multiplier      ?? 1.0,
   };
 }
 

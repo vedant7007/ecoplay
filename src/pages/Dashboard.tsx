@@ -10,6 +10,7 @@ import {
   TbTrendingUp,
   TbFish,
   TbLeaf,
+  TbFlame,
   TbSun,
   TbArrowUp,
   TbArrowDown,
@@ -18,11 +19,17 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useGamification } from '../hooks/useGamification';
+import { computeStreakMultiplier } from '../lib/gamification';
+import type { User } from '../types/auth';
 
 // ─── XP Panel Component ───────────────────────────────────────
 
-const XPPanel: React.FC<{ authUser: any }> = ({ authUser }) => {
+const XPPanel: React.FC<{ authUser: User | null }> = ({ authUser }) => {
+  const { state } = useGame();
   const { stats, streak, badges, leaderboard, userRank, loading } = useGamification(authUser?.id ?? null);
+
+  const currentStreak = state.streakState.streak_count;
+  const streakMultiplier = computeStreakMultiplier(currentStreak);
 
   const streakEmoji = (s: number) =>
     s >= 30 ? '💎' : s >= 14 ? '⚡' : s >= 7 ? '🔥' : s >= 3 ? '✨' : '🌱';
@@ -65,15 +72,15 @@ const XPPanel: React.FC<{ authUser: any }> = ({ authUser }) => {
       {/* Streak */}
       <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20">
         <h2 className="text-xl font-bold text-white mb-4">
-          {streakEmoji(streak?.currentStreak ?? 0)} Daily Streak
+          {streakEmoji(currentStreak)} Daily Streak
         </h2>
-        <div className="text-5xl font-black text-orange-400 mb-1">{streak?.currentStreak ?? 0}</div>
+        <div className="text-5xl font-black text-orange-400 mb-1">{currentStreak}</div>
         <p className="text-white/70 text-sm mb-3">day streak</p>
         <p className="text-white/50 text-xs mb-4">Best: {streak?.longestStreak ?? 0} days</p>
         <div className="bg-white/5 rounded-xl p-3">
           <p className="text-xs text-white/50 mb-1">Current Multiplier</p>
-          <p className={`text-2xl font-black ${multiplierColor(streak?.streakMultiplier ?? 1)}`}>
-            ×{streak?.streakMultiplier?.toFixed(1) ?? '1.0'}
+          <p className={`text-2xl font-black ${multiplierColor(streakMultiplier)}`}>
+            ×{streakMultiplier.toFixed(1)}
           </p>
           <p className="text-xs text-white/40 mt-1">applied to all XP earned</p>
         </div>
@@ -111,7 +118,7 @@ const XPPanel: React.FC<{ authUser: any }> = ({ authUser }) => {
           <div className="mt-4 pt-4 border-t border-white/10">
             <p className="text-xs text-white/50 mb-2">Your Badges</p>
             <div className="flex flex-wrap gap-2">
-              {badges.slice(0, 6).map((b: any) => (
+              {badges.slice(0, 6).map((b: { badge_key: string; badges?: { name?: string; icon?: string } }) => (
                 <span key={b.badge_key} title={b.badges?.name} className="text-xl cursor-default">
                   {b.badges?.icon}
                 </span>
@@ -128,12 +135,18 @@ const XPPanel: React.FC<{ authUser: any }> = ({ authUser }) => {
 
 const Dashboard = () => {
   const { state, dispatch } = useGame();
-  const { user, ecoVillage, dailyChallenges, gameStats } = state;
+  const { user, ecoVillage, dailyChallenges, gameStats, streakState, notifications } = state;
   const navigate = useNavigate();
   const { user: authUser } = useAuth();
 
   const [challenges, setChallenges] = React.useState(dailyChallenges);
   React.useEffect(() => setChallenges(dailyChallenges), [dailyChallenges]);
+
+  React.useEffect(() => {
+    if (!notifications.length) return;
+    const timer = window.setTimeout(() => dispatch({ type: 'CLEAR_NOTIFICATIONS' }), 3600);
+    return () => window.clearTimeout(timer);
+  }, [dispatch, notifications.length]);
 
   const useCounter = (end: number, duration: number = 2000) => {
     const [count, setCount] = useState(0);
@@ -186,11 +199,27 @@ const Dashboard = () => {
         if (c.id !== id || c.completed) return c;
         const next = Math.min(100, (c.progress ?? 0) + delta);
         const justCompleted = next >= 100;
-        if (justCompleted) dispatch?.({ type: 'ADD_POINTS', payload: c.points });
+
+        if (justCompleted) {
+          dispatch?.({
+            type: 'COMPLETE_DAILY_CHALLENGE',
+            payload: { points: c.points, challengeId: c.id },
+          });
+        }
+
+        dispatch?.({
+          type: 'UPDATE_CHALLENGE',
+          payload: { id: c.id, data: { progress: next, completed: justCompleted } },
+        });
+
         return { ...c, progress: next, completed: justCompleted };
       })
     );
   };
+
+  const currentStreak = streakState.streak_count;
+  const availableFreezes = streakState.streak_freeze_count;
+  const freezeRing = `${Math.max(0, Math.min(100, availableFreezes * 100))}%`;
 
   const stats = [
     {
@@ -258,6 +287,66 @@ const Dashboard = () => {
         <p className="text-xl text-blue-100 max-w-2xl mx-auto">
           Your environmental impact grows stronger every day. Continue your mission to save our planet!
         </p>
+      </motion.div>
+
+      {notifications.length > 0 && (
+        <motion.div variants={itemVariants} className="mb-6 flex flex-col gap-3">
+          {notifications.map((message, index) => (
+            <div
+              key={`${message}-${index}`}
+              className="rounded-xl border border-emerald-300/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-50"
+            >
+              {message}
+            </div>
+          ))}
+        </motion.div>
+      )}
+
+      <motion.div variants={itemVariants} className="mb-8 grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-6">
+        <div className="rounded-2xl border border-white/20 bg-white/10 p-6 backdrop-blur-lg">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm uppercase tracking-[0.2em] text-blue-100/80">Eco Streak</p>
+              <div className="mt-3 flex items-center gap-3">
+                <TbFlame className="h-8 w-8 text-orange-400" />
+                <div>
+                  <div className="text-4xl font-black text-orange-300">{currentStreak}</div>
+                  <p className="text-sm text-blue-100">day streak</p>
+                </div>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-orange-300/30 bg-orange-500/10 px-4 py-3 text-right">
+              <p className="text-xs text-orange-100">Multiplier</p>
+              <p className="mt-1 text-2xl font-black text-orange-300">×{computeStreakMultiplier(currentStreak).toFixed(1)}</p>
+            </div>
+          </div>
+          <div className="mt-5 rounded-xl bg-white/5 p-4 text-sm text-blue-100">
+            <p className="font-semibold text-white">How it works</p>
+            <p className="mt-2">Keep your daily challenge streak alive. Each week, you get one free freeze to protect your streak if you miss a day.</p>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-white/20 bg-white/10 p-6 backdrop-blur-lg">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm uppercase tracking-[0.2em] text-blue-100/80">Streak Freeze</p>
+              <p className="mt-2 text-3xl font-black text-emerald-300">{availableFreezes}</p>
+              <p className="text-sm text-blue-100">available this week</p>
+            </div>
+            <div
+              className="relative flex h-20 w-20 items-center justify-center rounded-full"
+              style={{ background: `conic-gradient(#34d399 ${freezeRing}, rgba(255,255,255,0.12) 0)` }}
+            >
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-slate-950/80">
+                <TbLeaf className="h-7 w-7 text-emerald-300" />
+              </div>
+            </div>
+          </div>
+          <div className="mt-5 rounded-xl bg-white/5 p-4 text-sm text-blue-100">
+            <p className="font-semibold text-white">Freeze badge</p>
+            <p className="mt-2">A freeze is consumed automatically when a day is missed, preserving your current streak until you complete the next challenge.</p>
+          </div>
+        </div>
       </motion.div>
 
       {/* Stats Grid */}
