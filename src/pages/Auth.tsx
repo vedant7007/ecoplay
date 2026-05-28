@@ -67,13 +67,19 @@ const Auth = () => {
       >
         {/* Header */}
         <div className="text-center mb-8">
+          
           <motion.div
-            whileHover={{ rotate: 360 }}
-            transition={{ duration: 0.8 }}
-            className="bg-gradient-to-br from-green-500 to-emerald-600 p-3 rounded-full w-16 h-16 mx-auto mb-4 flex items-center justify-center shadow-lg"
-          >
-            <Leaf className="h-8 w-8 text-white" />
-          </motion.div>
+  whileHover={{ scale: 1.1 }}
+  transition={{ duration: 0.3 }}
+  className="w-40 h-24 mx-auto mb-0"
+>
+  <img
+    src="/logo.png"
+    alt="EcoPlay Logo"
+    className="w-full h-full object-contain"
+  />
+</motion.div>
+
           <h1 className="text-3xl font-bold text-gray-900 mb-2">
             {isLogin ? 'Welcome Back!' : 'Join EcoPlay'}
           </h1>
